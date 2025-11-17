@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Restaurant Tables
+model RestaurantTable {
+  id          String      @id @default(uuid())
+  tableNumber String      @unique @map("table_number")
+  qrCodeUrl   String?     @map("qr_code_url")
+  status      TableStatus @default(AVAILABLE)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  sessions TableSession[]
+
+  @@map("restaurant_tables")
+}
+
+// Table Status Enum
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  CLEANING
+}
+
+// Table Sessions
+model TableSession {
+  id           String    @id @default(uuid())
+  tableId      String    @map("table_id")
+  sessionToken String    @unique @default(uuid()) @map("session_token")
+  startedAt    DateTime  @default(now()) @map("started_at")
+  closedAt     DateTime? @map("closed_at")
+  isActive     Boolean   @default(true) @map("is_active")
+
+  table  RestaurantTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@index([tableId])
+  @@index([sessionToken])
+  @@map("table_sessions")
+}
+
+// Menu Categories
+model MenuCategory {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  menuItems MenuItem[]
+
+  @@map("menu_categories")
+}
+
+// Menu Items
+model MenuItem {
+  id          String   @id @default(uuid())
+  categoryId  String   @map("category_id")
+  name        String
+  description String?
+  price       Float
+  imageUrl    String?  @map("image_url")
+  isAvailable Boolean  @default(true) @map("is_available")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  category   MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@index([categoryId])
+  @@map("menu_items")
+}
+
+// Orders
+model Order {
+  id         String      @id @default(uuid())
+  sessionId  String      @map("session_id")
+  status     OrderStatus @default(PENDING)
+  totalPrice Float       @default(0) @map("total_price")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+
+  session    TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@index([sessionId])
+  @@map("orders")
+}
+
+// Order Status Enum
+enum OrderStatus {
+  PENDING
+  COOKING
+  SERVED
+  PAID
+  CANCELLED
+}
+
+// Order Items
+model OrderItem {
+  id               String   @id @default(uuid())
+  orderId          String   @map("order_id")
+  menuItemId       String   @map("menu_item_id")
+  quantity         Int
+  note             String?
+  priceAtOrderTime Float    @map("price_at_order_time")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([menuItemId])
+  @@map("order_items")
+}
