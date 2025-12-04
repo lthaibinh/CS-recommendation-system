@@ -153,6 +153,52 @@ class ProjectOverviewResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# --- Pydantic Models for Dataset Overview API ---
+
+class DatasetKPIResponse(BaseModel):
+    totalUsers: int
+    totalOrders: int
+    totalProducts: int
+    avgOrdersPerUser: float
+    sparsity: float
+
+class UserPurchaseFrequencyResponse(BaseModel):
+    categories: List[str]
+    data: List[int]
+
+class ProductPopularityResponse(BaseModel):
+    categories: List[str]
+    data: List[int]
+
+class TopCategoriesResponse(BaseModel):
+    categories: List[str]
+    data: List[int]
+
+class TopProductsResponse(BaseModel):
+    categories: List[str]
+    data: List[int]
+
+class DataGrowthResponse(BaseModel):
+    categories: List[str]
+    data: List[int]
+
+class HeatmapDataPoint(BaseModel):
+    x: str
+    y: int
+
+class HeatmapSeries(BaseModel):
+    name: str
+    data: List[HeatmapDataPoint]
+
+class DatasetOverviewResponse(BaseModel):
+    kpi: DatasetKPIResponse
+    userPurchaseFrequency: UserPurchaseFrequencyResponse
+    productPopularity: ProductPopularityResponse
+    topCategories: TopCategoriesResponse
+    topProducts: TopProductsResponse
+    dataGrowth: DataGrowthResponse
+    heatmapData: List[HeatmapSeries]
+
 # ============================================================================ #
 # PART 3: Startup Event - Initialize Spark and Load Model
 # ============================================================================ #
@@ -539,6 +585,206 @@ async def reload_model():
 #         version_tag=model_version.version_tag
 #     )
 
+
+
+# ============================================================================ #
+# PART 7: Dataset Overview API Endpoints
+# ============================================================================ #
+
+@app.get("/api/v1/dataset-overview", response_model=DatasetOverviewResponse)
+async def get_dataset_overview():
+    """
+    Get comprehensive dataset overview statistics including:
+    - KPI metrics (users, orders, products, sparsity)
+    - User purchase frequency distribution
+    - Product popularity distribution
+    - Top categories and products
+    - Data growth over time
+    - User-item matrix heatmap sample
+    
+    This endpoint uses pandas for fast processing (no Spark required)
+    """
+    import pandas as pd
+    import glob
+    from datetime import datetime
+    
+    try:
+        # Load the dataset from CSV files using pandas
+        dataset_path = "/home/binhle/master-projects/intelligent-system/recommendation-system/backend/dataset"
+        
+        if not os.path.exists(dataset_path):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Dataset directory not found at {dataset_path}"
+            )
+        
+        # Load all CSV files and concatenate them
+        csv_files = glob.glob(f"{dataset_path}/label_full_data_part_*.csv")
+        if not csv_files:
+            raise HTTPException(
+                status_code=404,
+                detail="No CSV files found in dataset directory"
+            )
+        
+        # Read and concatenate all CSV files
+        df_list = []
+        for file in csv_files:
+            df_list.append(pd.read_csv(file))
+        df = pd.concat(df_list, ignore_index=True)
+        
+        # Calculate KPIs
+        total_users = df['Account_Id'].nunique()
+        total_orders = len(df)
+        total_products = df['ProductId'].nunique()
+        avg_orders_per_user = round(total_orders / total_users, 2) if total_users > 0 else 0
+        
+        # Calculate sparsity
+        total_possible_interactions = total_users * total_products
+        sparsity = round((1 - (total_orders / total_possible_interactions)) * 100, 2) if total_possible_interactions > 0 else 0
+        
+        kpi_data = DatasetKPIResponse(
+            totalUsers=int(total_users),
+            totalOrders=int(total_orders),
+            totalProducts=int(total_products),
+            avgOrdersPerUser=float(avg_orders_per_user),
+            sparsity=float(sparsity)
+        )
+        
+        # User Purchase Frequency Distribution
+        user_purchase_counts = df.groupby('Account_Id').size()
+        
+        def categorize_purchase_count(count):
+            if count == 1:
+                return "1"
+            elif count == 2:
+                return "2"
+            elif 3 <= count <= 5:
+                return "3-5"
+            elif 6 <= count <= 10:
+                return "6-10"
+            elif 11 <= count <= 20:
+                return "11-20"
+            else:
+                return "20+"
+        
+        purchase_bins = user_purchase_counts.apply(categorize_purchase_count)
+        purchase_freq_counts = purchase_bins.value_counts()
+        
+        bin_order = ["1", "2", "3-5", "6-10", "11-20", "20+"]
+        user_freq_data = [int(purchase_freq_counts.get(bin, 0)) for bin in bin_order]
+        
+        user_purchase_frequency = UserPurchaseFrequencyResponse(
+            categories=bin_order,
+            data=user_freq_data
+        )
+        
+        # Product Popularity Distribution
+        product_order_counts = df.groupby('ProductId').size()
+        
+        def categorize_product_popularity(count):
+            if 1 <= count <= 10:
+                return "1-10"
+            elif 11 <= count <= 50:
+                return "11-50"
+            elif 51 <= count <= 100:
+                return "51-100"
+            elif 101 <= count <= 200:
+                return "101-200"
+            else:
+                return "200+"
+        
+        product_bins = product_order_counts.apply(categorize_product_popularity)
+        product_pop_counts = product_bins.value_counts()
+        
+        pop_bin_order = ["1-10", "11-50", "51-100", "101-200", "200+"]
+        product_pop_data = [int(product_pop_counts.get(bin, 0)) for bin in pop_bin_order]
+        
+        product_popularity = ProductPopularityResponse(
+            categories=pop_bin_order,
+            data=product_pop_data
+        )
+        
+        # Top Categories by Purchase Count (using Family_Id)
+        if 'Family_Id' in df.columns:
+            family_counts = df[df['Family_Id'] != 0].groupby('Family_Id').size().sort_values(ascending=False).head(7)
+            
+            top_categories = TopCategoriesResponse(
+                categories=[f"Family {int(fid)}" for fid in family_counts.index],
+                data=[int(count) for count in family_counts.values]
+            )
+        else:
+            top_categories = TopCategoriesResponse(
+                categories=[],
+                data=[]
+            )
+        
+        # Top Products by Orders
+        product_counts = df.groupby('ProductId').size().sort_values(ascending=False).head(10)
+        
+        top_products = TopProductsResponse(
+            categories=[f"Product {int(pid)}" for pid in product_counts.index],
+            data=[int(count) for count in product_counts.values]
+        )
+        
+        # Data Growth Over Time (using TimePlaced)
+        if 'TimePlaced' in df.columns:
+            df['TimePlaced'] = pd.to_datetime(df['TimePlaced'])
+            df['month'] = df['TimePlaced'].dt.to_period('M').astype(str)
+            growth_counts = df.groupby('month').size().sort_index().tail(12)
+            
+            data_growth = DataGrowthResponse(
+                categories=growth_counts.index.tolist(),
+                data=[int(count) for count in growth_counts.values]
+            )
+        else:
+            data_growth = DataGrowthResponse(
+                categories=[],
+                data=[]
+            )
+        
+        # Generate Heatmap Data (sample 20x20 matrix)
+        # Get top 20 users and top 20 products
+        top_users = df.groupby('Account_Id').size().sort_values(ascending=False).head(20).index.tolist()
+        top_20_products = df.groupby('ProductId').size().sort_values(ascending=False).head(20).index.tolist()
+        
+        # Create interaction matrix
+        heatmap_series = []
+        for i, user_id in enumerate(top_users):
+            user_data = df[df['Account_Id'] == user_id]
+            user_product_counts = user_data[user_data['ProductId'].isin(top_20_products)].groupby('ProductId').size()
+            
+            heatmap_row = []
+            for j, product_id in enumerate(top_20_products):
+                count = user_product_counts.get(product_id, 0)
+                heatmap_row.append(
+                    HeatmapDataPoint(
+                        x=f"P{j + 1}",
+                        y=int(min(count, 5))  # Cap at 5 for visualization
+                    )
+                )
+            
+            heatmap_series.append(
+                HeatmapSeries(
+                    name=f"U{i + 1}",
+                    data=heatmap_row
+                )
+            )
+        
+        return DatasetOverviewResponse(
+            kpi=kpi_data,
+            userPurchaseFrequency=user_purchase_frequency,
+            productPopularity=product_popularity,
+            topCategories=top_categories,
+            topProducts=top_products,
+            dataGrowth=data_growth,
+            heatmapData=heatmap_series
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating dataset overview: {str(e)}"
+        )
 
 
 # ============================================================================ #

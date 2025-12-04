@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { ApexOptions } from 'apexcharts';
+import { getDatasetOverview, DatasetOverviewResponse } from '@/services/overviewService';
 
 // Dynamically import ReactApexChart to avoid SSR issues
 const ReactApexChart = dynamic(() => import('react-apexcharts'), {
@@ -10,14 +11,58 @@ const ReactApexChart = dynamic(() => import('react-apexcharts'), {
 });
 
 export default function OverviewCharts() {
-    // Mock Data: Dataset Overview KPIs
-    const kpiData = {
-        totalUsers: 1247,
-        totalOrders: 8934,
-        totalProducts: 156,
-        avgOrdersPerUser: 7.2,
-        sparsity: 94.3, // percentage
-    };
+    const [overviewData, setOverviewData] = useState<DatasetOverviewResponse | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const subscription = getDatasetOverview().subscribe({
+            next: (response: any) => {
+                setOverviewData(response.data);
+                setLoading(false);
+            },
+            error: (err) => {
+                console.error('Error fetching dataset overview:', err);
+                setError('Failed to load dataset overview. Please try again later.');
+                setLoading(false);
+            },
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    // Loading state
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-gray-50 py-8 px-4 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                    <p className="mt-4 text-gray-600">Loading dataset overview...</p>
+                </div>
+            </div>
+        );
+    }
+
+    // Error state
+    if (error || !overviewData) {
+        return (
+            <div className="min-h-screen bg-gray-50 py-8 px-4 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="text-red-600 text-xl mb-2">⚠️</div>
+                    <p className="text-gray-800 font-semibold">{error || 'Failed to load data'}</p>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                        Retry
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // Use real data from API
+    const kpiData = overviewData.kpi;
 
     // Mock Data: User Purchase Frequency Distribution
     const userPurchaseFrequencyOptions: ApexOptions = {
@@ -45,7 +90,7 @@ export default function OverviewCharts() {
             },
         },
         xaxis: {
-            categories: ['1', '2', '3-5', '6-10', '11-20', '20+'],
+            categories: overviewData.userPurchaseFrequency.categories,
             title: {
                 text: 'Number of Purchases',
             },
@@ -66,7 +111,7 @@ export default function OverviewCharts() {
     const userPurchaseFrequencySeries = [
         {
             name: 'Users',
-            data: [425, 312, 268, 156, 62, 24], // Long-tail distribution
+            data: overviewData.userPurchaseFrequency.data,
         },
     ];
 
@@ -96,7 +141,7 @@ export default function OverviewCharts() {
             },
         },
         xaxis: {
-            categories: ['1-10', '11-50', '51-100', '101-200', '200+'],
+            categories: overviewData.productPopularity.categories,
             title: {
                 text: 'Number of Orders',
             },
@@ -117,7 +162,7 @@ export default function OverviewCharts() {
     const productPopularitySeries = [
         {
             name: 'Products',
-            data: [89, 42, 18, 5, 2], // Long-tail distribution
+            data: overviewData.productPopularity.data,
         },
     ];
 
@@ -154,15 +199,7 @@ export default function OverviewCharts() {
             },
         },
         xaxis: {
-            categories: [
-                'Main Course (Món chính)',
-                'Appetizers (Khai vị)',
-                'Beverages (Đồ uống)',
-                'Desserts (Tráng miệng)',
-                'Soups (Súp)',
-                'Salads (Salad)',
-                'Side Dishes (Món phụ)',
-            ],
+            categories: overviewData.topCategories.categories,
             title: {
                 text: 'Number of Orders',
             },
@@ -183,7 +220,7 @@ export default function OverviewCharts() {
     const topCategoriesSeries = [
         {
             name: 'Orders',
-            data: [2847, 1923, 1756, 982, 754, 423, 249],
+            data: overviewData.topCategories.data,
         },
     ];
 
@@ -220,18 +257,7 @@ export default function OverviewCharts() {
             },
         },
         xaxis: {
-            categories: [
-                'Phở Bò Đặc Biệt',
-                'Cơm Gà Xối Mỡ',
-                'Bún Chả Hà Nội',
-                'Trà Sữa Trân Châu',
-                'Bánh Mì Thịt Nướng',
-                'Gỏi Cuốn Tôm Thịt',
-                'Cà Phê Sữa Đá',
-                'Bún Bò Huế',
-                'Chả Giò Rế',
-                'Cơm Tấm Sườn Bì',
-            ],
+            categories: overviewData.topProducts.categories,
             title: {
                 text: 'Number of Orders',
             },
@@ -252,7 +278,7 @@ export default function OverviewCharts() {
     const topProductsSeries = [
         {
             name: 'Orders',
-            data: [523, 487, 456, 423, 398, 367, 342, 318, 289, 267],
+            data: overviewData.topProducts.data,
         },
     ];
 
@@ -277,19 +303,7 @@ export default function OverviewCharts() {
             },
         },
         xaxis: {
-            categories: [
-                'Jan 2024',
-                'Feb 2024',
-                'Mar 2024',
-                'Apr 2024',
-                'May 2024',
-                'Jun 2024',
-                'Jul 2024',
-                'Aug 2024',
-                'Sep 2024',
-                'Oct 2024',
-                'Nov 2024',
-            ],
+            categories: overviewData.dataGrowth.categories,
             title: {
                 text: 'Month',
             },
@@ -316,31 +330,11 @@ export default function OverviewCharts() {
     const dataGrowthSeries = [
         {
             name: 'Orders',
-            data: [342, 456, 523, 612, 745, 823, 897, 934, 1023, 1145, 1234],
+            data: overviewData.dataGrowth.data,
         },
     ];
 
-    // Mock Data: User-Item Matrix Sparsity Heatmap
-    // For demonstration, we'll create a sample 10x10 matrix showing sparse interactions
-    const generateHeatmapData = () => {
-        const data = [];
-        for (let i = 0; i < 20; i++) {
-            const row = [];
-            for (let j = 0; j < 20; j++) {
-                // Create sparse data (5-10% density)
-                const hasInteraction = Math.random() < 0.08;
-                row.push({
-                    x: `P${j + 1}`,
-                    y: hasInteraction ? Math.floor(Math.random() * 5) + 1 : 0,
-                });
-            }
-            data.push({
-                name: `U${i + 1}`,
-                data: row,
-            });
-        }
-        return data;
-    };
+    // Use real heatmap data from API
 
     const heatmapOptions: ApexOptions = {
         chart: {
@@ -416,7 +410,7 @@ export default function OverviewCharts() {
         },
     };
 
-    const heatmapSeries = generateHeatmapData();
+    const heatmapSeries = overviewData.heatmapData;
 
     return (
         <div className="min-h-screen bg-gray-50 py-8 px-4">

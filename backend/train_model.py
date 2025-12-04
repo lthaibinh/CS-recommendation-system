@@ -500,7 +500,7 @@ def train_and_eval(rank, regParam, alpha, maxIter, versionTag):
     print("="*80)
     print("CALCULATING METRICS")
     print("="*80)
-    metrics_dict = calculate_metrics_optimized(model, validation_data, k_values=[10, 15])
+    metrics_dict = calculate_metrics_optimized(model, validation_data)
     
     # Also keep the old NDCG@10 log for backward compatibility
     if 10 in metrics_dict:
