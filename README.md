@@ -1,7 +1,5 @@
 # CS Recommendation System
 
----
-
 ## Overview
 
 A fully containerized product recommendation system built using collaborative filtering (ALS) in Apache Spark, served through a FastAPI backend and a modern Next.js frontend.
