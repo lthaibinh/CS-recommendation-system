@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend 
+      dockerfile: Dockerfile
+    container_name: recommendation_backend
+
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./ml_platform.db:/app/ml_platform.db
+      - ./backend/dataset:/app/dataset
+    environment:
+      - DATABASE_URL=sqlite:///ml_platform.db
+    networks:
+      - app_network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: recommendation_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NEXTAUTH_SECRET=your-secret-key
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1 
+    networks:
+      - app_network
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+networks:
+  app_network:
+    driver: bridge
