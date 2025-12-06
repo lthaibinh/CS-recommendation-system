@@ -1,6 +1,6 @@
 # CS Recommendation System
 
-A fully containerized **Product Recommendation System** built using **Collaborative Filtering (ALS)** in **Apache Spark**, served through a scalable **FastAPI backend**, and modern **Next.js** as frontend. 
+A fully containerized product recommendation system built using collaborative filtering (ALS) in Apache Spark, served through a FastAPI backend and a modern Next.js frontend.
 ---
 
 ## Overview
@@ -28,7 +28,7 @@ This project implements a complete end-to-end recommendation pipeline:
 
 Follow the steps below to run the application locally.
 
-### 1️⃣ Clone the Repository
+### Clone the Repository
 
 ```bash
 git clone [YOUR_REPOSITORY_URL]
@@ -37,7 +37,7 @@ cd CS-RECOMMENDATION-SYSTEM
 
 ---
 
-## 🐳 Running the Application
+## Running the Application
 
 ### 1️⃣ Build and Run the Containers
 
