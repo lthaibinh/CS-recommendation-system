@@ -1,11 +1,10 @@
 # CS Recommendation System
 
-A fully containerized product recommendation system built using collaborative filtering (ALS) in Apache Spark, served through a FastAPI backend and a modern Next.js frontend.
 ---
 
 ## Overview
 
-This project implements a complete end-to-end recommendation pipeline:
+A fully containerized product recommendation system built using collaborative filtering (ALS) in Apache Spark, served through a FastAPI backend and a modern Next.js frontend.
 
 * **Machine Learning**: Collaborative Filtering using Apache Spark's **ALS (Alternating Least Squares)** algorithm
 * **Backend**: FastAPI + Uvicorn, exposing RESTful endpoints to serve ML predictions
