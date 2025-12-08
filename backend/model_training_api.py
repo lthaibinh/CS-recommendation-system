@@ -1256,7 +1256,6 @@ async def set_active_model_version(
         created_at=model_version.created_at,
         isActive=model_version.isActive
     )
-
     return ActiveModelVersionResponse(
         active_version=active_version_response,
         message=f"Successfully set active version to: {active_version_response.version_tag}"

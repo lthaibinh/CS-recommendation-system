@@ -421,11 +421,11 @@ async def root():
         },
         "endpoints": {
             "recommendations": {
-                "get_recommendations": "/recommendations/{user_id}",
+                "get_recommendations": "/api/v1/recommendations/{user_id}",
                 "get_multiple_recommendations": "/recommendations/batch"
             },
             "model_management": {
-                "reload_active_model": "POST /model/reload",
+                "reload_active_model": "POST /api/v1/model/reload",
                 "list_model_versions": "GET /api/v1/model-training/model-versions",
                 "get_active_version": "GET /api/v1/model-training/model-versions/active",
                 "set_active_version": "POST /api/v1/model-training/model-versions/active"
@@ -457,7 +457,7 @@ async def health_check():
         "active_model_created": active_model_version.created_at.isoformat() if active_model_version else None
     }
 
-@app.get("/recommendations/{user_id}", response_model=UserRecommendationsResponse)
+@app.get("/api/v1/recommendations/{user_id}", response_model=UserRecommendationsResponse)
 async def get_recommendations(user_id: int, num_items: int = 10):
     """
     Get product recommendations for a single user.
@@ -475,7 +475,16 @@ async def get_recommendations(user_id: int, num_items: int = 10):
     recommendations = get_recommendations_for_user(user_id, num_items)
     
     if not recommendations:
-        raise HTTPException(status_code=404, detail=f"No recommendations found for user {user_id}")
+        # Fallback: return ProductIds from 1 to num_items with default rating
+        return UserRecommendationsResponse(
+            user_id=user_id,
+            recommendations=[
+                {'ProductId': product_id, 'rating': 0.0} 
+                for product_id in range(1, num_items + 1)
+            ],
+            count=num_items,
+            active_model_version=active_model_version.version_tag if active_model_version else None
+        )
     
     return UserRecommendationsResponse(
         user_id=user_id,
@@ -513,7 +522,7 @@ async def get_batch_recommendations(request: MultipleUsersRequest):
     )
 
 
-@app.post("/model/reload")
+@app.post("/api/v1/model/reload")
 async def reload_model():
     """
     Reload the active model version.

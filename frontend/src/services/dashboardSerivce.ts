@@ -98,6 +98,15 @@ export interface ModelVersion {
   isActive: boolean;
 }
 
+export interface ActiveModelVersionResponse {
+  active_version: ModelVersion | null;
+  message: string;
+}
+
+export interface SetActiveVersionRequest {
+  model_version_id: number;
+}
+
 // Query parameters interfaces
 export interface GetRunsParams {
   status?: RunStatus;
@@ -251,5 +260,36 @@ export const getModelVersions = () => {
   return axiosObservable<ModelVersion[]>({
     method: "get",
     url: "/model-training/model-versions",
+  });
+};
+
+/**
+ * Get the currently active model version
+ */
+export const getActiveModelVersion = () => {
+  return axiosObservable<ActiveModelVersionResponse>({
+    method: "get",
+    url: "/model-training/model-versions/active",
+  });
+};
+
+/**
+ * Set a model version as active
+ */
+export const setActiveModelVersion = (data: SetActiveVersionRequest) => {
+  return axiosObservable<ActiveModelVersionResponse>({
+    method: "post",
+    url: "/model-training/model-versions/active",
+    data,
+  });
+};
+
+/**
+ * Reload the model
+ */
+export const reloadModel = () => {
+  return axiosObservable<{ message: string }>({
+    method: "post",
+    url: "/model/reload",
   });
 };

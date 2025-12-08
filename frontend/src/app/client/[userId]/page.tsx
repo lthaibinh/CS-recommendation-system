@@ -1,149 +1,123 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, Button, Badge, Rating } from 'flowbite-react';
 import { ChevronLeft, ChevronRight, Star, ShoppingCart, Clock, TrendingUp } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
+import { axiosInstance } from '@/utils/axios';
 
-// Mock data for recommended grocery items
-const mockRecommendations = [
-  {
-    id: 1,
-    name: 'Organic Avocados',
-    description: 'Fresh ripe Hass avocados, perfect for toast, salads, and guacamole',
-    price: 5.99,
-    image: 'https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=500&h=400&fit=crop',
-    rating: 4.7,
-    reviews: 234,
-    category: 'Produce',
-    preparationTime: 'Ready to eat',
-    trending: true,
-    discount: 15
-  },
-  {
-    id: 2,
-    name: 'Grass-Fed Ground Beef',
-    description: '1 lb package of premium grass-fed ground beef, 85% lean',
-    price: 12.99,
-    image: 'https://images.unsplash.com/photo-1603048588665-791ca8aea617?w=500&h=400&fit=crop',
-    rating: 4.8,
-    reviews: 456,
-    category: 'Meat',
-    preparationTime: 'Cook before eating',
-    trending: true,
-    discount: null
-  },
-  {
-    id: 3,
-    name: 'Fresh Atlantic Salmon',
-    description: 'Wild-caught salmon fillet, rich in omega-3, 1 lb',
-    price: 18.99,
-    image: 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?w=500&h=400&fit=crop',
-    rating: 4.9,
-    reviews: 312,
-    category: 'Seafood',
-    preparationTime: 'Cook before eating',
-    trending: false,
-    discount: 10
-  },
-  {
-    id: 4,
-    name: 'Organic Blueberries',
-    description: 'Fresh organic blueberries, 16 oz container, perfect for smoothies',
-    price: 6.49,
-    image: 'https://images.unsplash.com/photo-1498557850523-fd3d118b962e?w=500&h=400&fit=crop',
-    rating: 4.6,
-    reviews: 189,
-    category: 'Produce',
-    preparationTime: 'Ready to eat',
-    trending: true,
-    discount: null
-  },
-  {
-    id: 5,
-    name: 'Extra Virgin Olive Oil',
-    description: 'Cold-pressed Italian extra virgin olive oil, 500ml bottle',
-    price: 14.99,
-    image: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=500&h=400&fit=crop',
-    rating: 4.8,
-    reviews: 567,
-    category: 'Pantry',
-    preparationTime: 'Ready to use',
-    trending: false,
-    discount: 20
-  },
-  {
-    id: 6,
-    name: 'Organic Free-Range Eggs',
-    description: 'Cage-free organic eggs, 12 count, rich and nutritious',
-    price: 7.99,
-    image: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?w=500&h=400&fit=crop',
-    rating: 4.9,
-    reviews: 423,
-    category: 'Dairy',
-    preparationTime: 'Cook before eating',
-    trending: true,
-    discount: null
-  },
-  {
-    id: 7,
-    name: 'Greek Yogurt',
-    description: 'Creamy full-fat Greek yogurt, high protein, 32 oz container',
-    price: 5.49,
-    image: 'https://images.unsplash.com/photo-1488477181946-6428a0291777?w=500&h=400&fit=crop',
-    rating: 4.7,
-    reviews: 298,
-    category: 'Dairy',
-    preparationTime: 'Ready to eat',
-    trending: false,
-    discount: null
-  },
-  {
-    id: 8,
-    name: 'Organic Quinoa',
-    description: 'Pre-washed organic tri-color quinoa, 2 lb bag, gluten-free',
-    price: 9.99,
-    image: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=500&h=400&fit=crop',
-    rating: 4.5,
-    reviews: 201,
-    category: 'Pantry',
-    preparationTime: 'Cook before eating',
-    trending: false,
-    discount: 15
-  },
-  {
-    id: 9,
-    name: 'Fresh Baby Spinach',
-    description: 'Organic baby spinach leaves, 16 oz bag, pre-washed',
-    price: 4.99,
-    image: 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?w=500&h=400&fit=crop',
-    rating: 4.6,
-    reviews: 178,
-    category: 'Produce',
-    preparationTime: 'Ready to eat',
-    trending: true,
-    discount: null
-  },
+// Types for API response
+interface RecommendationResponse {
+  ProductId: number;
+  rating: number;
+}
 
-  {
-    id: 10,
-    name: 'Sourdough Bread',
-    description: 'Artisan sourdough bread, freshly baked, 24 oz loaf',
-    price: 6.99,
-    image: 'https://images.unsplash.com/photo-1549931319-a545dcf3bc73?w=500&h=400&fit=crop',
-    rating: 4.9,
-    reviews: 389,
-    category: 'Bakery',
-    preparationTime: 'Ready to eat',
-    trending: false,
-    discount: null
-  },
-];
+interface UserRecommendationsResponse {
+  user_id: number;
+  recommendations: RecommendationResponse[];
+  count: number;
+  active_model_version: string;
+}
+
+// Interface for display items
+interface RecommendationItem {
+  id: number;
+  name: string;
+  description: string;
+  price: number;
+  image: string;
+  rating: number;
+  reviews: number;
+  category: string;
+  preparationTime: string;
+  trending: boolean;
+  discount: number | null;
+}
+
+// Helper function to generate placeholder data for products
+const generateProductPlaceholder = (productId: number, rating: number, index: number): RecommendationItem => {
+  // Use productId to generate consistent placeholder data
+  const categories = ['Produce', 'Meat', 'Seafood', 'Dairy', 'Pantry', 'Bakery', 'Beverages', 'Snacks'];
+  const category = categories[productId % categories.length];
+  
+  // Generate consistent placeholder images based on productId
+  const imageIds = [
+    '1523049673857-eb18f1d7b578', // Avocado
+    '1603048588665-791ca8aea617', // Beef
+    '1519708227418-c8fd9a32b7a2', // Salmon
+    '1498557850523-fd3d118b962e', // Blueberries
+    '1474979266404-7eaacbcd87c5', // Olive Oil
+    '1582722872445-44dc5f7e3c8f', // Eggs
+    '1488477181946-6428a0291777', // Yogurt
+    '1586201375761-83865001e31c', // Quinoa
+    '1576045057995-568f588f82fb', // Spinach
+    '1549931319-a545dcf3bc73', // Bread
+  ];
+  const imageId = imageIds[productId % imageIds.length];
+  
+  // Generate price based on productId (consistent)
+  const basePrice = 5.99 + (productId % 20) * 0.5;
+  
+  return {
+    id: productId,
+    name: `Product ${productId}`,
+    description: `High-quality product ${productId} from our curated selection`,
+    price: Math.round(basePrice * 100) / 100,
+    image: `https://images.unsplash.com/photo-${imageId}?w=500&h=400&fit=crop`,
+    rating: Math.min(5, Math.max(3.5, rating)), // Clamp rating between 3.5 and 5
+    reviews: 100 + (productId % 500),
+    category: category,
+    preparationTime: index % 2 === 0 ? 'Ready to eat' : 'Cook before eating',
+    trending: index < 3, // First 3 items are trending
+    discount: index % 3 === 0 ? (10 + (index % 3) * 5) : null,
+  };
+};
 
 export default function ClientPage() {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const itemsPerPage = 6;
-  const totalPages = Math.ceil(mockRecommendations.length / itemsPerPage);
+  const router = useRouter();
+  const params = useParams();
+  const userId = params?.userId ? parseInt(params.userId as string) : null;
+
+  // Fetch recommendations from API
+  useEffect(() => {
+    const fetchRecommendations = async () => {
+      if (!userId) {
+        setError('User ID not found');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+        
+        const response = await axiosInstance.get<UserRecommendationsResponse>(
+          `/recommendations/${userId}?num_items=100`
+        );
+        
+        // Transform API response to display format
+        const transformedRecommendations = response.data.recommendations.map((rec, index) =>
+          generateProductPlaceholder(rec.ProductId, rec.rating, index)
+        );
+        
+        setRecommendations(transformedRecommendations);
+      } catch (err: any) {
+        console.error('Error fetching recommendations:', err);
+        setError(err.response?.data?.detail || err.message || 'Failed to fetch recommendations');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecommendations();
+  }, [userId]);
+
+  const totalPages = Math.ceil(recommendations.length / itemsPerPage);
 
   const nextSlide = () => {
     setCurrentIndex((prevIndex) =>
@@ -159,9 +133,8 @@ export default function ClientPage() {
 
   const getCurrentItems = () => {
     const startIndex = currentIndex * itemsPerPage;
-    return mockRecommendations.slice(startIndex, startIndex + itemsPerPage);
+    return recommendations.slice(startIndex, startIndex + itemsPerPage);
   };
-  const router = useRouter();
 
   const calculateDiscountedPrice = (price: number, discount: number | null) => {
     if (!discount) return null;
@@ -191,7 +164,56 @@ export default function ClientPage() {
           </p>
         </div>
 
+        {/* Loading State */}
+        {loading && (
+          <div className="flex justify-center items-center py-20">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              <p className="mt-4 text-gray-600 dark:text-gray-400">Loading recommendations...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Error State */}
+        {error && !loading && (
+          <div className="flex justify-center items-center py-20">
+            <div className="text-center">
+              <div className="text-red-600 dark:text-red-400 text-xl mb-2">⚠️ Error</div>
+              <p className="text-gray-600 dark:text-gray-400">{error}</p>
+              <Button
+                color="blue"
+                className="mt-4"
+                onClick={() => {
+                  setError(null);
+                  setLoading(true);
+                  const fetchRecommendations = async () => {
+                    if (!userId) return;
+                    try {
+                      const response = await axiosInstance.get<UserRecommendationsResponse>(
+                        `/recommendations/${userId}?num_items=100`
+                      );
+                      const transformedRecommendations = response.data.recommendations.map((rec, index) =>
+                        generateProductPlaceholder(rec.ProductId, rec.rating, index)
+                      );
+                      setRecommendations(transformedRecommendations);
+                      setError(null);
+                    } catch (err: any) {
+                      setError(err.response?.data?.detail || err.message || 'Failed to fetch recommendations');
+                    } finally {
+                      setLoading(false);
+                    }
+                  };
+                  fetchRecommendations();
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Carousel Section */}
+        {!loading && !error && recommendations.length > 0 && (
         <div className="relative">
           {/* Navigation Buttons */}
           <button
@@ -302,16 +324,30 @@ export default function ClientPage() {
             ))}
           </div>
         </div>
+        )}
+
+        {/* Empty State */}
+        {!loading && !error && recommendations.length === 0 && (
+          <div className="flex justify-center items-center py-20">
+            <div className="text-center">
+              <p className="text-gray-600 dark:text-gray-400 text-lg">
+                No recommendations available at this time.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Additional Info Section */}
-        <div className="mt-12 text-center">
-          <div className="inline-flex items-center gap-2 px-6 py-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <p className="text-sm text-gray-700 dark:text-gray-300">
-              Recommendations updated based on your preferences
-            </p>
+        {!loading && !error && recommendations.length > 0 && (
+          <div className="mt-12 text-center">
+            <div className="inline-flex items-center gap-2 px-6 py-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                Recommendations updated based on your preferences
+              </p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -11,9 +11,15 @@ import {
   resumeTrainingSchedule,
   updateTrainingSchedule,
   getModelRunLogs,
+  getModelVersions,
+  getActiveModelVersion,
+  setActiveModelVersion,
+  reloadModel,
   type ModelRun as APIModelRun,
   type TrainingSchedule,
-  type TrainingStatistics
+  type TrainingStatistics,
+  type ModelVersion,
+  type ActiveModelVersionResponse
 } from '@/services/dashboardSerivce';
 import { Subscription } from 'rxjs';
 
@@ -70,6 +76,11 @@ export default function Page() {
   const [statistics, setStatistics] = useState<TrainingStatistics | null>(null);
   const [runLogs, setRunLogs] = useState<Record<string, string>>({});
   const [loadingLogs, setLoadingLogs] = useState<Record<string, boolean>>({});
+  const [modelVersions, setModelVersions] = useState<ModelVersion[]>([]);
+  const [activeVersion, setActiveVersion] = useState<ModelVersion | null>(null);
+  const [loadingVersions, setLoadingVersions] = useState(true);
+  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  const [activatingVersion, setActivatingVersion] = useState(false);
   
   // Super parameters for schedule
   const [scheduleRank, setScheduleRank] = useState<number>(10);
@@ -135,6 +146,35 @@ export default function Page() {
       },
     });
     subscriptions.push(statsSub);
+
+    // Fetch model versions
+    const versionsSub = getModelVersions().subscribe({
+      next: (response: any) => {
+        const versions = response.data || [];
+        setModelVersions(versions);
+        setLoadingVersions(false);
+      },
+      error: (error) => {
+        console.error('Error fetching model versions:', error);
+        setLoadingVersions(false);
+      },
+    });
+    subscriptions.push(versionsSub);
+
+    // Fetch active version
+    const activeVersionSub = getActiveModelVersion().subscribe({
+      next: (response: any) => {
+        const activeVersionData = response.data?.active_version || null;
+        setActiveVersion(activeVersionData);
+        if (activeVersionData) {
+          setSelectedVersionId(activeVersionData.id);
+        }
+      },
+      error: (error) => {
+        console.error('Error fetching active version:', error);
+      },
+    });
+    subscriptions.push(activeVersionSub);
 
     return () => {
       subscriptions.forEach(sub => sub.unsubscribe());
@@ -276,6 +316,59 @@ export default function Page() {
     return () => sub.unsubscribe();
   };
 
+  const handleActivateVersion = (versionId?: number) => {
+    const idToActivate = versionId || selectedVersionId;
+    if (!idToActivate) {
+      setAlertMessage('Please select a version to activate');
+      setAlertType('error');
+      setAlertOpen(true);
+      return;
+    }
+
+    setActivatingVersion(true);
+    const sub = setActiveModelVersion({ model_version_id: idToActivate }).subscribe({
+      next: (response: any) => {
+        const activeVersionData = response.data?.active_version;
+        setActiveVersion(activeVersionData);
+        // Update the versions list to reflect the active status
+        setModelVersions(prev => 
+          prev.map(v => ({
+            ...v,
+            isActive: v.id === idToActivate
+          }))
+        );
+        setSelectedVersionId(idToActivate);
+        
+        // Reload the model after setting active version
+        const reloadSub = reloadModel().subscribe({
+          next: (reloadResponse: any) => {
+            setActivatingVersion(false);
+            setAlertMessage(reloadResponse.data?.message || 'Version activated and model reloaded successfully');
+            setAlertType('success');
+            setAlertOpen(true);
+            reloadSub.unsubscribe();
+          },
+          error: (reloadError: any) => {
+            setActivatingVersion(false);
+            const reloadMessage = reloadError.response?.data?.error?.message || reloadError.response?.data?.detail || 'Version activated but failed to reload model';
+            setAlertMessage(reloadMessage);
+            setAlertType('error');
+            setAlertOpen(true);
+            reloadSub.unsubscribe();
+          },
+        });
+      },
+      error: (error: any) => {
+        const message = error.response?.data?.error?.message || error.response?.data?.detail || 'Failed to activate version';
+        setAlertMessage(message);
+        setAlertType('error');
+        setAlertOpen(true);
+        setActivatingVersion(false);
+      },
+    });
+    // Note: Subscription cleanup is handled automatically by RxJS
+  };
+
   const getStatusColor = (status: RunStatus) => {
     switch (status) {
       case 'success':
@@ -310,6 +403,135 @@ export default function Page() {
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-7xl mx-auto">
+
+      {/* Active Version Section */}
+      <div className="mb-6 mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">ALS Model Version</h1>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Quản lý version đang active trên hệ thống
+            </p>
+          </div>
+        </div>
+
+        {/* Current Active Version Card */}
+        <div className="mb-6 p-6 bg-white border border-gray-200 rounded-lg shadow-sm dark:bg-gray-800 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Current Active Version</h2>
+          </div>
+          
+          {loadingVersions ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+              <span className="ml-3 text-gray-600 dark:text-gray-400">Loading versions...</span>
+            </div>
+          ) : activeVersion ? (
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg dark:bg-green-900/20 dark:border-green-800">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm font-medium text-green-800 dark:text-green-300">Active</span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Version Tag</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-white">{activeVersion.version_tag}</p>
+                  </div>
+                  <div className="border-l border-gray-300 dark:border-gray-600 pl-4">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Version ID</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-white">#{activeVersion.id}</p>
+                  </div>
+                  <div className="border-l border-gray-300 dark:border-gray-600 pl-4">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Created At</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {formatDateTime(activeVersion.created_at)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg dark:bg-yellow-900/20 dark:border-yellow-800">
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-yellow-600 dark:text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <p className="text-yellow-800 dark:text-yellow-300 font-medium">No active version configured</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Version Selection Card */}
+        <div className="mb-6 p-6 bg-white border border-gray-200 rounded-lg shadow-sm dark:bg-gray-800 dark:border-gray-700">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Select Version to Activate</h2>
+          
+          {loadingVersions ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+              <span className="ml-3 text-gray-600 dark:text-gray-400">Loading versions...</span>
+            </div>
+          ) : modelVersions.length === 0 ? (
+            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg dark:bg-gray-700 dark:border-gray-600">
+              <p className="text-gray-600 dark:text-gray-400 text-center">No model versions available</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Versions List */}
+              <div className="mt-6">
+                <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-3">All Versions</h3>
+                <div className="space-y-2 h-96 overflow-y-auto">
+                  {modelVersions.map((version) => (
+                    <div
+                      key={version.id}
+                      className={`p-3 border rounded-lg ${
+                        version.isActive
+                          ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800'
+                          : 'bg-gray-50 border-gray-200 dark:bg-gray-700 dark:border-gray-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {version.isActive && (
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          )}
+                          <div>
+                            <p className="font-medium text-gray-900 dark:text-white">
+                              {version.version_tag}
+                              {version.isActive && (
+                                <span className="ml-2 text-xs text-green-600 dark:text-green-400 font-semibold">ACTIVE</span>
+                              )}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              ID: {version.id} • Created: {formatDateTime(version.created_at)}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (version.id !== activeVersion?.id) {
+                              handleActivateVersion(version.id);
+                            }
+                          }}
+                          disabled={version.isActive || activatingVersion}
+                          className={`px-3 py-1 text-xs font-medium rounded ${
+                            version.isActive || activatingVersion
+                              ? 'bg-gray-200 text-gray-400 cursor-not-allowed dark:bg-gray-600 dark:text-gray-500'
+                              : 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800'
+                          }`}
+                        >
+                          {version.isActive ? 'Active' : 'Activate'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
         {/* Header */}
         <div className="mb-6 mt-8">
