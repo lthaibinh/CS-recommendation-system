@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --break-system-packages --no-cache-dir -r requirements.txt
 
 COPY . .
-COPY ../ml_platform.db . 
+
 
 EXPOSE 8000
 
