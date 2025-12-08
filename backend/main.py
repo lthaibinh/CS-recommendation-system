@@ -619,7 +619,7 @@ async def get_dataset_overview():
     
     try:
         # Load the dataset from CSV files using pandas
-        dataset_path = "/home/binhle/master-projects/intelligent-system/recommendation-system/backend/dataset"
+        dataset_path = "/app/dataset"
         
         if not os.path.exists(dataset_path):
             raise HTTPException(
