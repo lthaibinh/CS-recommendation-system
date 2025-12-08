@@ -232,9 +232,10 @@ export default function ClientPage() {
   };
 
   const logout = () => {
-    document.cookie = "role=; path=/; userId=;";
+    // Delete cookies by setting them to expire in the past
+    document.cookie = "role=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    document.cookie = "userId=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     router.push('/login');
-
   };
 
   return (
