@@ -1,7 +1,7 @@
 'use client';
 
 import CustomAlert from '@/components/CustomAlert';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   getModelRuns, 
   getTrainingSchedule, 
@@ -81,6 +81,9 @@ export default function Page() {
   const [loadingVersions, setLoadingVersions] = useState(true);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [activatingVersion, setActivatingVersion] = useState(false);
+  
+  // Ref to store previous runs for comparison
+  const previousRunsRef = useRef<ModelRun[]>([]);
   
   // Super parameters for schedule
   const [scheduleRank, setScheduleRank] = useState<number>(10);
@@ -184,16 +187,82 @@ export default function Page() {
   // Refresh data periodically (every 30 seconds) if there are running/queued jobs
   useEffect(() => {
     const hasActiveJobs = runs.some(r => r.status === 'running' || r.status === 'queued');
-    if (!hasActiveJobs) return;
+    if (!hasActiveJobs) {
+      // Update ref when effect exits
+      previousRunsRef.current = runs;
+      return;
+    }
 
     const subscriptions: Subscription[] = [];
+    
     const interval = setInterval(() => {
       const sub = getModelRuns({ sort: '-start_time' }).subscribe({
         next: (response: any) => {
           const data = response.data;
           if (data && data.data) {
             const transformedRuns = data.data.map(transformModelRun);
+            const previousRuns = previousRunsRef.current;
+            
+            // DEBUG: Log comparison details
+            console.log('=== DEBUG: Run Status Comparison ===');
+            console.log('Previous runs count:', previousRuns.length);
+            console.log('Transformed runs count:', transformedRuns.length);
+            console.log('Previous runs:', previousRuns.map((r: ModelRun) => ({ id: r.id, status: r.status })));
+            console.log('Transformed runs:', transformedRuns.map((r: ModelRun) => ({ id: r.id, status: r.status })));
+            
+            // Check if there are new successful runs or status changes
+            const hasNewSuccessfulRun = transformedRuns.some((newRun: ModelRun) => {
+              const oldRun = previousRuns.find(r => r.id === newRun.id);
+              const isNewSuccessful = (!oldRun && newRun.status === 'success');
+              const isStatusChangeToSuccess = (oldRun && (oldRun.status === 'running' || oldRun.status === 'queued') && newRun.status === 'success');
+              
+              // DEBUG: Log each comparison
+              if (isNewSuccessful || isStatusChangeToSuccess) {
+                console.log('Found successful run change:', {
+                  runId: newRun.id,
+                  oldStatus: oldRun?.status || 'N/A (new run)',
+                  newStatus: newRun.status,
+                  isNewSuccessful,
+                  isStatusChangeToSuccess
+                });
+              }
+              
+              // New run that's successful, or run that changed from running/queued to success
+              return isNewSuccessful || isStatusChangeToSuccess;
+            });
+            
+            // Check if there are any new runs (by comparing IDs)
+            const previousRunIds = new Set(previousRuns.map(r => r.id));
+            const hasNewRuns = transformedRuns.some((r: ModelRun) => !previousRunIds.has(r.id));
+            
+            // DEBUG: Log final results
+            console.log('hasNewSuccessfulRun:', hasNewSuccessfulRun);
+            console.log('hasNewRuns:', hasNewRuns);
+            console.log('=== END DEBUG ===');
+            
+            // Update ref BEFORE setRuns to prevent effect re-run from overwriting it
+            previousRunsRef.current = transformedRuns;
             setRuns(transformedRuns);
+            
+            // Refetch model versions if there are new successful runs or new runs detected
+            if (hasNewSuccessfulRun || hasNewRuns) {
+              // Don't add to subscriptions array - it will be cleaned up automatically
+              // when it completes, preventing premature cancellation when effect re-runs
+              const versionsSub = getModelVersions().subscribe({
+                next: (versionsResponse: any) => {
+                  const versions = versionsResponse.data || [];
+                  setModelVersions(versions);
+                  console.log('Refreshed model versions:', versions);
+                  // Clean up after successful completion
+                  versionsSub.unsubscribe();
+                },
+                error: (error) => {
+                  console.error('Error refreshing model versions:', error);
+                  // Clean up after error
+                  versionsSub.unsubscribe();
+                },
+              });
+            }
           }
         },
         error: (error) => {
@@ -202,6 +271,13 @@ export default function Page() {
       });
       subscriptions.push(sub);
     }, 30000);
+
+    // Initialize ref with current runs only if it's empty (first time effect runs)
+    // After that, the ref is updated in the interval callback before setRuns,
+    // so we don't want to overwrite it here when effect re-runs due to setRuns
+    if (previousRunsRef.current.length === 0 && runs.length > 0) {
+      previousRunsRef.current = runs;
+    }
 
     return () => {
       clearInterval(interval);

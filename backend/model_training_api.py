@@ -205,7 +205,7 @@ def calculate_next_run(cron_expr: str) -> Optional[datetime]:
 class ModelVersionResponse(BaseModel):
     id: int
     version_tag: str
-    artifact_path: str
+    artifact_path: Optional[str] = None  # Make optional to match database nullable=True
     created_at: datetime
     isActive: bool
 
@@ -745,25 +745,36 @@ async def run_training_task(
                     run.logs += f"\n✓ Model training completed successfully.\n"
 
                 # Save successful model to model_versions table
+                # Note: train_model.py already saves the model to database, so we check if it exists
                 try:
-                    # Create model version entry
                     model_path = f"models/als_model_{version_tag}"
-                    # Set project_id=1 for single-project system (or None if nullable)
-                    # Check if project_id column exists and handle accordingly
-                    model_version = ModelVersion(
-                        version_tag=version_tag,
-                        artifact_path=model_path,
-                        project_id=1  # Default project ID for single-project system
-                    )
-                    db.add(model_version)
+                    
+                    # Check if model version already exists (created by train_model.py)
+                    model_version = db.query(ModelVersion).filter(
+                        ModelVersion.version_tag == version_tag
+                    ).first()
+                    
+                    if not model_version:
+                        # Create model version entry if it doesn't exist (fallback)
+                        model_version = ModelVersion(
+                            version_tag=version_tag,
+                            artifact_path=model_path,
+                            project_id=1  # Default project ID for single-project system
+                        )
+                        db.add(model_version)
+                        db.commit()
+                        run.logs += f"✓ Created model version entry in database: {version_tag}\n"
+                    else:
+                        # Model version already exists (created by train_model.py)
+                        run.logs += f"✓ Model version already exists in database: {version_tag}\n"
+                        if model_version.model_data:
+                            model_size_mb = len(model_version.model_data) / (1024*1024)
+                            run.logs += f"  • Model stored in database ({model_size_mb:.2f} MB)\n"
+                        if model_version.artifact_path:
+                            run.logs += f"  • Model path: {model_version.artifact_path}\n"
                     
                     # log hyperparameters
                     run.logs += f"Hyperparameters: rank={rank}, regParam={regParam}, alpha={alpha}, maxIter={maxIter}\n"
-                    run.logs += f"✓ Model version saved to database: {version_tag}\n"
-                    run.logs += f"  Model path: {model_path}\n"
-                    
-                    # Commit model version first to get the ID
-                    db.commit()
                     
                     # Save metrics to database
                     if extracted_metrics:
@@ -1178,7 +1189,13 @@ async def get_run_logs(run_id: str, db: Session = Depends(get_db)):
 @router.get("/model-versions", response_model=List[ModelVersionResponse])
 async def get_model_versions(db: Session = Depends(get_db)):
     """Get all available model versions"""
-    versions = db.query(ModelVersion).order_by(ModelVersion.created_at.desc()).all()
+    versions = db.query(
+        ModelVersion.id,
+        ModelVersion.version_tag,
+        ModelVersion.artifact_path,
+        ModelVersion.created_at,
+        ModelVersion.isActive
+    ).order_by(ModelVersion.created_at.desc()).all()
     return [
         ModelVersionResponse(
             id=v.id,
@@ -1195,7 +1212,13 @@ async def get_model_versions(db: Session = Depends(get_db)):
 async def get_active_model_version(db: Session = Depends(get_db)):
     """Get the currently active model version"""
     # Get active model version (where isActive=True)
-    active_version = db.query(ModelVersion).filter(
+    active_version = db.query(
+        ModelVersion.id,
+        ModelVersion.version_tag,
+        ModelVersion.artifact_path,
+        ModelVersion.created_at,
+        ModelVersion.isActive
+    ).filter(
         ModelVersion.isActive == True
     ).first()
 
@@ -1269,7 +1292,9 @@ async def get_model_metrics(
 ):
     """Get all metrics for a specific model version"""
     # Verify that the model version exists
-    model_version = db.query(ModelVersion).filter(
+    model_version = db.query(
+        ModelVersion.version_tag,
+    ).filter(
         ModelVersion.id == version_id
     ).first()
     

@@ -1,11 +1,15 @@
 """
-Database models and session management for SQLite
+Database models and session management for PostgreSQL
+
+The database connection string can be set via the DATABASE_URL environment variable.
+If not set, it defaults to the Neon PostgreSQL connection string.
 """
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float, Boolean, ForeignKey, Index
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float, Boolean, ForeignKey, Index, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import uuid
+import os
 
 Base = declarative_base()
 
@@ -32,7 +36,8 @@ class ModelVersion(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, nullable=True)  # Legacy column for single-project system (no FK constraint)
     version_tag = Column(String, nullable=False)  # e.g., "v1.0.0", "v1.1.0", "2025-11-12_12-30-00"
-    artifact_path = Column(String, nullable=False)  # e.g., "s3://my-bucket/als_recommender/v1.1.0.pkl"
+    artifact_path = Column(String, nullable=True)  # Optional: file path for backward compatibility
+    model_data = Column(LargeBinary, nullable=True)  # Binary data of the model (zipped directory)
     isActive = Column(Boolean, default=False, nullable=False)  # Indicates if this model version is active/loaded
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
@@ -110,14 +115,42 @@ class TrainingSchedule(Base):
 
 
 # Database setup
-SQLALCHEMY_DATABASE_URL = "sqlite:///./ml_platform.db"
+# Use PostgreSQL connection string from environment variable or default
+SQLALCHEMY_DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://neondb_owner:npg_uyQw3XCvVd9m@ep-late-recipe-a1io9vga-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+)
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False}  # Needed for SQLite
+    pool_pre_ping=True,  # Verify connections before using
+    pool_size=5,  # Connection pool size
+    max_overflow=10  # Max overflow connections
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def migrate_add_model_data_column():
+    """Add model_data column to model_versions table if it doesn't exist"""
+    from sqlalchemy import inspect, text
+    
+    try:
+        inspector = inspect(engine)
+        if 'model_versions' not in inspector.get_table_names():
+            return
+        
+        columns = [col['name'] for col in inspector.get_columns('model_versions')]
+        
+        if 'model_data' not in columns:
+            print("🔄 Migrating database: Adding model_data column to model_versions table...")
+            with engine.connect() as conn:
+                # PostgreSQL supports IF NOT EXISTS
+                conn.execute(text("ALTER TABLE model_versions ADD COLUMN IF NOT EXISTS model_data BYTEA"))
+                conn.commit()
+            print("✅ Migration completed: model_data column added to model_versions")
+    except Exception as e:
+        print(f"⚠️ Migration note: {e}")
 
 
 def init_db():
@@ -131,6 +164,8 @@ def init_db():
     migrate_add_hyperparameters_to_model_runs()
     # Migrate existing database to add hyperparameter columns to training_schedule if they don't exist
     migrate_add_hyperparameters_to_training_schedule()
+    # Migrate existing database to add model_data column to model_versions if it doesn't exist
+    migrate_add_model_data_column()
 
 
 def migrate_add_isActive_to_model_versions():
@@ -150,9 +185,8 @@ def migrate_add_isActive_to_model_versions():
         if 'isActive' not in columns:
             print("🔄 Migrating database: Adding isActive column to model_versions table...")
             with engine.connect() as conn:
-                # SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN
-                # So we check first and then add
-                conn.execute(text("ALTER TABLE model_versions ADD COLUMN isActive BOOLEAN DEFAULT 0"))
+                # PostgreSQL supports IF NOT EXISTS
+                conn.execute(text("ALTER TABLE model_versions ADD COLUMN IF NOT EXISTS \"isActive\" BOOLEAN DEFAULT FALSE"))
                 conn.commit()
             print("✅ Migration completed: isActive column added to model_versions")
     except Exception as e:
@@ -175,11 +209,11 @@ def migrate_remove_project_id_columns():
                 col_info = next((col for col in inspector.get_columns('model_versions') if col['name'] == 'project_id'), None)
                 if col_info and col_info.get('nullable') is False:
                     print("🔄 Migrating database: Making project_id nullable in model_versions table...")
-                    # SQLite doesn't support ALTER COLUMN directly, so we need to recreate the table
-                    # For now, we'll use a workaround: set default value to NULL in application code
-                    # The column will remain NOT NULL in DB but we'll handle it in code
-                    print("⚠️ Note: project_id column exists but SQLite doesn't support ALTER COLUMN.")
-                    print("   Setting project_id=1 for new ModelVersion records.")
+                    with engine.connect() as conn:
+                        # PostgreSQL supports ALTER COLUMN
+                        conn.execute(text("ALTER TABLE model_versions ALTER COLUMN project_id DROP NOT NULL"))
+                        conn.commit()
+                    print("✅ Migration completed: project_id is now nullable")
         
         # Check other tables
         tables_to_check = ['builds', 'schedules']
@@ -205,8 +239,8 @@ def migrate_add_hyperparameters_to_model_runs():
         columns = [col['name'] for col in inspector.get_columns('model_runs')]
         columns_to_add = {
             'rank': 'INTEGER',
-            'regParam': 'REAL',
-            'alpha': 'REAL',
+            'regParam': 'DOUBLE PRECISION',
+            'alpha': 'DOUBLE PRECISION',
             'maxIter': 'INTEGER'
         }
         
@@ -215,7 +249,8 @@ def migrate_add_hyperparameters_to_model_runs():
             if col_name not in columns:
                 print(f"🔄 Migrating database: Adding {col_name} column to model_runs table...")
                 with engine.connect() as conn:
-                    conn.execute(text(f"ALTER TABLE model_runs ADD COLUMN {col_name} {col_type}"))
+                    # PostgreSQL supports IF NOT EXISTS
+                    conn.execute(text(f"ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS \"{col_name}\" {col_type}"))
                     conn.commit()
                 added_columns.append(col_name)
         
@@ -237,8 +272,8 @@ def migrate_add_hyperparameters_to_training_schedule():
         columns = [col['name'] for col in inspector.get_columns('training_schedule')]
         columns_to_add = {
             'rank': 'INTEGER',
-            'regParam': 'REAL',
-            'alpha': 'REAL',
+            'regParam': 'DOUBLE PRECISION',
+            'alpha': 'DOUBLE PRECISION',
             'maxIter': 'INTEGER'
         }
         
@@ -247,7 +282,8 @@ def migrate_add_hyperparameters_to_training_schedule():
             if col_name not in columns:
                 print(f"🔄 Migrating database: Adding {col_name} column to training_schedule table...")
                 with engine.connect() as conn:
-                    conn.execute(text(f"ALTER TABLE training_schedule ADD COLUMN {col_name} {col_type}"))
+                    # PostgreSQL supports IF NOT EXISTS
+                    conn.execute(text(f"ALTER TABLE training_schedule ADD COLUMN IF NOT EXISTS \"{col_name}\" {col_type}"))
                     conn.commit()
                 added_columns.append(col_name)
         

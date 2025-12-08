@@ -17,6 +17,9 @@ from glob import glob
 import os
 from datetime import datetime, timezone
 import warnings
+import zipfile
+import shutil
+import tempfile
 warnings.filterwarnings('ignore')
 
 # Set visualization style
@@ -483,18 +486,8 @@ def train_and_eval(rank, regParam, alpha, maxIter, versionTag):
     )
     model = als.fit(train_data)
 
-    print("💾 SAVING MODEL TO DISK")
+    print("💾 SAVING MODEL TO DATABASE")
     print("="*80)
-
-     
-    # Create models directory if it doesn't exist
-    models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
-    os.makedirs(models_dir, exist_ok=True)
-    
-    # Save model with version
-    model_path = os.path.join(models_dir, f"als_model_{versionTag}")
-
-    model.write().overwrite().save(model_path)
 
     # Calculate and log all metrics
     print("="*80)
@@ -506,6 +499,83 @@ def train_and_eval(rank, regParam, alpha, maxIter, versionTag):
     if 10 in metrics_dict:
         ndcg_10 = metrics_dict[10]['ndcg']
         print(f"Kết quả (Validation) NDCG@10 = {ndcg_10:.4f} {rank}, {regParam}, {alpha}, {maxIter}")
+
+    # Save model to database
+    print("="*80)
+    print("💾 SAVING MODEL TO DATABASE")
+    print("="*80)
+    try:
+        from database import SessionLocal, ModelVersion
+        
+        # Save model to temporary directory (will be deleted after zipping)
+        temp_model_dir = tempfile.mkdtemp()
+        temp_model_path = os.path.join(temp_model_dir, f"als_model_{versionTag}")
+        
+        # Save model to temp directory
+        model.write().overwrite().save(temp_model_path)
+        print(f"✅ Model saved to temporary directory: {temp_model_path}")
+        
+        # Create a zip file of the model directory
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        temp_zip_path = temp_zip.name
+        temp_zip.close()
+        
+        with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(temp_model_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Store relative path in zip
+                    arcname = os.path.relpath(file_path, temp_model_path)
+                    zipf.write(file_path, arcname)
+        
+        # Read zip file as binary
+        with open(temp_zip_path, 'rb') as f:
+            model_data = f.read()
+        
+        # Clean up temporary files and directories
+        os.unlink(temp_zip_path)
+        shutil.rmtree(temp_model_dir)
+        print(f"✅ Cleaned up temporary files")
+        
+        # Save to database
+        db = SessionLocal()
+        try:
+            # Check if model version already exists
+            existing_version = db.query(ModelVersion).filter(
+                ModelVersion.version_tag == versionTag
+            ).first()
+            
+            if existing_version:
+                # Update existing version
+                existing_version.model_data = model_data
+                existing_version.artifact_path = None  # No disk path since we're not saving to disk
+                print(f"✅ Updated existing model version in database: {versionTag}")
+            else:
+                # Create new model version
+                model_version = ModelVersion(
+                    version_tag=versionTag,
+                    artifact_path=None,  # No disk path since we're not saving to disk
+                    model_data=model_data,
+                    project_id=1,
+                    isActive=False
+                )
+                db.add(model_version)
+                print(f"✅ Saved new model version to database: {versionTag}")
+            
+            db.commit()
+            print(f"  • Model size: {len(model_data) / (1024*1024):.2f} MB")
+            print(f"  • Database storage: PostgreSQL")
+        except Exception as db_error:
+            db.rollback()
+            print(f"❌ Error saving model to database: {db_error}")
+            raise
+        finally:
+            db.close()
+    except ImportError as import_error:
+        print(f"⚠️ Warning: Could not import database module: {import_error}")
+        print("   Please ensure database.py is available.")
+    except Exception as e:
+        print(f"⚠️ Warning: Error saving model to database: {e}")
 
 
 if __name__ == "__main__":

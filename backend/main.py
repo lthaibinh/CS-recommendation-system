@@ -10,6 +10,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import zipfile
+import tempfile
 # Import database models and session
 from database import (
     init_db, get_db, Build, ModelVersion, Metric, Schedule, ModelRun, TrainingSchedule
@@ -270,6 +272,7 @@ def load_active_model():
         print("❌ Spark session not available")
         return None, None
 
+    temp_model_dir = None
     try:
         # Get database session
         db = next(get_db())
@@ -283,15 +286,91 @@ def load_active_model():
             print("⚠️ No active model version configured")
             return None, None
 
-        # Load the model
-        model_path = model_version.artifact_path
-        print(f"📂 Loading model from: {model_path}")
+        print(f"📂 Loading model version: {model_version.version_tag}")
+        
+        # Try to load from database (model_data) first
+        if model_version.model_data:
+            print("  • Loading from database storage...")
+            try:
+                # Use a persistent directory within models folder instead of temp
+                models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+                os.makedirs(models_dir, exist_ok=True)
+                
+                # Create a directory for this specific model version
+                extracted_model_dir = os.path.join(models_dir, f"als_model_{model_version.version_tag}_extracted")
+                
+                # Check if already extracted (to avoid re-extracting on reload)
+                if os.path.exists(extracted_model_dir) and os.listdir(extracted_model_dir):
+                    print(f"  • Using existing extracted model directory: {extracted_model_dir}")
+                    # Verify it has the metadata directory (PySpark ALS model requirement)
+                    if 'metadata' in os.listdir(extracted_model_dir):
+                        model_path = extracted_model_dir
+                    else:
+                        # Might be in a subdirectory
+                        extracted_items = os.listdir(extracted_model_dir)
+                        extracted_dirs = [d for d in extracted_items 
+                                         if os.path.isdir(os.path.join(extracted_model_dir, d))]
+                        if extracted_dirs:
+                            model_path = os.path.join(extracted_model_dir, extracted_dirs[0])
+                        else:
+                            model_path = extracted_model_dir
+                else:
+                    # Extract from database
+                    print(f"  • Extracting model from database...")
+                    os.makedirs(extracted_model_dir, exist_ok=True)
+                    
+                    # Extract zip file from database
+                    temp_zip_path = os.path.join(extracted_model_dir, "model.zip")
+                    with open(temp_zip_path, 'wb') as f:
+                        f.write(model_version.model_data)
+                    
+                    # Extract zip file
+                    with zipfile.ZipFile(temp_zip_path, 'r') as zipf:
+                        zipf.extractall(extracted_model_dir)
+                    
+                    # Remove zip file, keep extracted directory
+                    os.unlink(temp_zip_path)
+                    
+                    # Check what was extracted - files might be at root or in subdirectories
+                    extracted_items = os.listdir(extracted_model_dir)
+                    # Look for metadata directory (PySpark ALS models always have metadata/)
+                    if 'metadata' in extracted_items:
+                        # Model files are at root level
+                        model_path = extracted_model_dir
+                    else:
+                        # Check if there's a subdirectory (shouldn't happen with current zip logic, but handle it)
+                        extracted_dirs = [d for d in extracted_items 
+                                         if os.path.isdir(os.path.join(extracted_model_dir, d))]
+                        if extracted_dirs:
+                            model_path = os.path.join(extracted_model_dir, extracted_dirs[0])
+                        else:
+                            # Use extracted_model_dir itself
+                            model_path = extracted_model_dir
+                    
+                    print(f"  • Extracted to directory: {model_path}")
+                
+                loaded_model = ALSModel.load(model_path)
+                print("  • Model loaded from database successfully")
+                
+            except Exception as db_load_error:
+                print(f"  ⚠️ Error loading from database: {db_load_error}")
+                print("  • Falling back to file system...")
+                import traceback
+                traceback.print_exc()
+                # Fall through to file system loading
+        
+        # Fallback to file system loading if database load failed or model_data is None
+        if loaded_model is None:
+            model_path = model_version.artifact_path
+            if model_path and os.path.exists(model_path):
+                print(f"  • Loading from file system: {model_path}")
+                loaded_model = ALSModel.load(model_path)
+                print("  • Model loaded from file system successfully")
+            else:
+                print(f"❌ Model path does not exist: {model_path}")
+                print("   Please ensure the model is available in database or file system")
+                return None, None
 
-        if not os.path.exists(model_path):
-            print(f"❌ Model path does not exist: {model_path}")
-            return None, None
-
-        loaded_model = ALSModel.load(model_path)
         active_model_version = model_version
 
         print("✅ Model loaded successfully")        
@@ -305,6 +384,8 @@ def load_active_model():
 
     except Exception as e:
         print(f"❌ Error loading active model: {e}")
+        import traceback
+        traceback.print_exc()
         return None, None
     finally:
         db.close()
@@ -619,7 +700,7 @@ async def get_dataset_overview():
     
     try:
         # Load the dataset from CSV files using pandas
-        dataset_path = "/app/dataset"
+        dataset_path = "/app/dataset" #"/home/binhle/master-projects/intelligent-system/recommendation-system/backend/dataset"
         
         if not os.path.exists(dataset_path):
             raise HTTPException(
